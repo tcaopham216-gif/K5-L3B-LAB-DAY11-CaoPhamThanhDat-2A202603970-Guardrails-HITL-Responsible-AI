@@ -9,7 +9,7 @@
 - **Họ và tên:** Cao Phạm Thành Đạt
 - **MSSV:** 2A202603970
 
-Phần Blue dùng Python 3.12 và `requirements.txt`. Chạy `python src/main.py --part 2` để kiểm tra bộ lọc và `python src/main.py --part 3` để chạy bộ đánh giá phòng thủ. Cấu hình biến môi trường theo `.env.example`.
+Môi trường dùng Python 3.12 và `requirements.txt`. Chạy `python src/main.py --part 2` (CP2), `python src/main.py --part 3` (CP3 — sinh `outputs/results.json`, `audit_log.json`, `metrics.json`), `python src/main.py --part 4` (CP4 — sinh `outputs/attack_results.json` và log Red / Red Advance), rồi tự kiểm với `pytest tests/smoke -q`, `pytest tests/public -q` và `python scripts/grade.py --submission-dir . --out outputs/grade_report.json`. Cấu hình biến môi trường theo `.env.example`.
 
 ## Thời lượng
 
