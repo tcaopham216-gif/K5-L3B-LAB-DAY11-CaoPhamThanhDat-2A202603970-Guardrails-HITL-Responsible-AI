@@ -6,6 +6,11 @@
 
 ---
 
+- **Họ và tên:** Cao Phạm Thành Đạt
+- **MSSV:** 2A202603970
+
+Phần Blue dùng Python 3.12 và `requirements.txt`. Chạy `python src/main.py --part 2` để kiểm tra bộ lọc và `python src/main.py --part 3` để chạy bộ đánh giá phòng thủ. Cấu hình biến môi trường theo `.env.example`.
+
 ## Thời lượng
 
 | Phần | Thời gian |
