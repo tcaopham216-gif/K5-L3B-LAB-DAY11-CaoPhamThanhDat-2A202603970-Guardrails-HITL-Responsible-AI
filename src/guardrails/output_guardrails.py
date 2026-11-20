@@ -12,6 +12,7 @@ from google.adk.agents import llm_agent
 from google.adk import runners
 from google.adk.plugins import base_plugin
 
+from core.config import DEMO_SECRETS
 from core.utils import chat_with_agent
 
 
@@ -27,40 +28,40 @@ from core.utils import chat_with_agent
 # - "redacted": cleaned response (PII replaced with [REDACTED])
 # ============================================================
 
+_PII_PATTERNS = {
+    "api_key": r"\bsk-[a-z0-9_-]+",
+    "password": r"(?:\bpassword\b|mật\s+khẩu)\s*(?:[:=]|\bis\b)\s*[^\s,;]+",
+    "db_host": r"\b(?:[a-z0-9-]+\.)+internal(?::\d+)?\b",
+    "email": r"[\w.+-]+@[\w.-]+\.[a-z]{2,}\b",
+    "phone": r"(?<!\w)(?:\+84|0)(?:[ .-]?\d){9,10}(?!\w)",
+    "national_id": r"\b(?:\d{12}|\d{9})\b",
+}
+if DEMO_SECRETS:
+    _PII_PATTERNS["protected_value"] = "|".join(
+        re.escape(value) for value in sorted(DEMO_SECRETS, key=len, reverse=True)
+    )
+
+_SENSITIVE = re.compile(
+    "|".join(f"(?P<{name}>{pattern})" for name, pattern in _PII_PATTERNS.items()),
+    re.IGNORECASE,
+)
+
+
 def content_filter(response: str) -> dict:
-    """Filter response for PII, secrets, and harmful content.
+    """Return a redacted copy and descriptions that contain no raw values."""
+    counts = {}
 
-    Args:
-        response: The LLM's response text
+    def redact(match):
+        name = match.lastgroup
+        counts[name] = counts.get(name, 0) + 1
+        return "[REDACTED]"
 
-    Returns:
-        dict with 'safe', 'issues', and 'redacted' keys
-    """
-    issues = []
-    redacted = response
-
-    # PII patterns to check
-    PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
-    }
-
-    for name, pattern in PII_PATTERNS.items():
-        matches = re.findall(pattern, response, re.IGNORECASE)
-        if matches:
-            issues.append(f"{name}: {len(matches)} found")
-            redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.IGNORECASE)
-
+    redacted = _SENSITIVE.sub(redact, response)
     return {
-        "safe": len(issues) == 0,
-        "issues": issues,
+        "safe": not counts,
+        "issues": [f"{name}: {count} found" for name, count in counts.items()],
         "redacted": redacted,
     }
-
 
 # ============================================================
 # OPTIONAL (không chấm): LLM-as-Judge
@@ -148,13 +149,14 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         self.use_llm_judge = use_llm_judge and (safety_judge_agent is not None)
         self.blocked_count = 0
         self.redacted_count = 0
+        self.judge_checks = 0
         self.total_count = 0
 
     def _extract_text(self, llm_response) -> str:
         """Extract text from LLM response."""
         text = ""
         if hasattr(llm_response, "content") and llm_response.content:
-            for part in llm_response.content.parts:
+            for part in llm_response.content.parts or []:
                 if hasattr(part, "text") and part.text:
                     text += part.text
         return text
@@ -172,17 +174,21 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
-        # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
-
-        return llm_response  # TODO: modify if needed
-
+        report = content_filter(response_text)
+        safe_text = report["redacted"]
+        if not report["safe"]:
+            self.redacted_count += 1
+        if self.use_llm_judge:
+            self.judge_checks += 1
+            verdict = await llm_safety_check(safe_text)
+            if not verdict["safe"]:
+                self.blocked_count += 1
+                safe_text = "Response blocked by the output security policy."
+        if safe_text != response_text:
+            llm_response.content = types.Content(
+                role="model", parts=[types.Part.from_text(text=safe_text)]
+            )
+        return llm_response
 
 # ============================================================
 # Quick tests
